@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "molformer"
+description = "Molformer Library for Molecular Property Prediction"
+version = "0.0.0"
+authors = [
+    {name = "Yan Xiang", email="yan.xiang@duke.edu"}
+]
+readme = "README.md"
+license = {text = "MIT"}
+classifiers = [
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
+keywords = [
+    "chemistry",
+    "machine learning",
+    "molecular property prediction",
+    "marginalized graph kernel",
+    "drug discovery"
+]
+requires-python = ">=3.10"
+dependencies = [
+]
+
+[project.urls]
+source = "https://github.com/xiangyan93/molformer4molalkit"
+
+[project.scripts]
+molformer_cv = "molformer.run:molformer_cv"
+molformer_optuna = "molformer.run:molformer_optuna"
+
+[tool.setuptools.package-data]
+"*" = ["bert_vocab.txt"]
+
+[tool.setuptools.packages.find]
+where = ["."]  # list of folders that contain the packages (["."] by default)
+namespaces = false  # to disable scanning PEP 420 namespaces (true by default)
