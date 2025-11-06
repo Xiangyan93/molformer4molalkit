@@ -124,6 +124,7 @@ class Evaluator:
         self.num_folds = num_folds
         self.seed = seed
         self.verbose = verbose
+        self.skip_train = False
 
     @property
     def write_file(self) -> bool:
@@ -187,7 +188,8 @@ class Evaluator:
 
     def run_external(self, dataset_test: Dataset, name='test_ext'):
         # assert self.cross_validation == "no", "cross_validation must be 'no' for run_external()."
-        df_predict, df_metrics = self.evaluate_train_test(self.dataset, dataset_test)
+        df_predict, df_metrics = self.evaluate_train_test(self.dataset, dataset_test, skip_train=self.skip_train)
+        self.skip_train = True
         df_predict.to_csv("%s/%s_prediction.csv" % (self.save_dir, name), index=False)
         if df_metrics is not None:
             # Calculate metrics values.
@@ -197,8 +199,9 @@ class Evaluator:
         return df_metrics['value'].mean()
 
     def evaluate_train_test(self, dataset_train: Dataset,
-                            dataset_test: Dataset) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        self.model.fit_molalkit(dataset_train)
+                            dataset_test: Dataset, skip_train=False) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        if not skip_train:
+            self.model.fit_molalkit(dataset_train)
         y_preds = self.model.predict_value(dataset_test)
         pred_dict = {}
         for i in range(dataset_train.N_tasks):
