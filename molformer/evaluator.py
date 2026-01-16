@@ -219,6 +219,9 @@ class Evaluator:
         return df_predict, df_metrics
 
     def eval_metric(self, y, y_pred, metric):
+        mask = ~np.isnan(y)
+        y = y[mask]
+        y_pred = y_pred[mask]
         if self.task_type == "regression":
             return metric_regression(y, y_pred, metric)
         elif self.task_type == "classification":

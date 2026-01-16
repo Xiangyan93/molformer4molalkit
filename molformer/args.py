@@ -4,6 +4,7 @@ import os
 import copy
 import pandas as pd
 from sklearn.model_selection import KFold
+from rdkit import Chem
 from mgktools.data.data import Dataset
 from mgktools.evaluators.cross_validation import Metric
 from molformer.checkpoints import AVAILABLE_CHECKPOINTS
@@ -68,16 +69,24 @@ class TrainArgs(Tap):
     """Number of training epochs."""
     batch_size: int = 128
     """Batch size for training."""
+    weight_decay: float = 0.0
+    """Weight decay (L2 regularization) factor."""
 
     @property
     def metrics(self) -> List[Metric]:
         return [self.metric] + self.extra_metrics
-        
+    
+    def get_df(self, file_path: str) -> pd.DataFrame:
+        df = pd.read_csv(file_path)
+        for col in self.smiles_columns:
+            df[col] = df[col].apply(lambda x: Chem.MolToSmiles(Chem.MolFromSmiles(x)))
+        return df
+
     def process_args(self) -> None:
         if self.pretrained_path is None:
-            self.pretrained_path = AVAILABLE_CHECKPOINTS[-1]
+            self.pretrained_path = AVAILABLE_CHECKPOINTS[1]
         self.dataset = Dataset.from_df(
-            df=pd.read_csv(self.data_path),
+            df=self.get_df(self.data_path),
             smiles_columns=self.smiles_columns,
             features_columns=None,
             targets_columns=self.targets_columns,
@@ -88,7 +97,7 @@ class TrainArgs(Tap):
                                 features_combination=None)
         if self.separate_test_path is not None:
             self.dataset_test = Dataset.from_df(
-                df=pd.read_csv(self.separate_test_path),
+                df=self.get_df(self.separate_test_path),
                 smiles_columns=self.smiles_columns,
                 features_columns=None,
                 targets_columns=self.targets_columns,
@@ -99,7 +108,7 @@ class TrainArgs(Tap):
                                         features_combination=None)
         if self.separate_val_path is not None:
             self.dataset_val = Dataset.from_df(
-                df=pd.read_csv(self.separate_val_path),
+                df=self.get_df(self.separate_val_path),
                 smiles_columns=self.smiles_columns,
                 features_columns=None,
                 targets_columns=self.targets_columns,

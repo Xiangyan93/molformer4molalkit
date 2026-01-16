@@ -58,9 +58,9 @@ class LightningModule(pl.LightningModule):
 
         self.fcs = []
         if config.task_type == 'regression':
-            self.loss = torch.nn.L1Loss()
+            self.loss = torch.nn.L1Loss(reduction="none")
         elif config.task_type == 'binary':
-            self.loss = torch.nn.BCEWithLogitsLoss()
+            self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
         self.net = self.Net(
             config.n_embd, config.num_tasks, dropout=config.dropout,
         )
@@ -182,7 +182,7 @@ class LightningModule(pl.LightningModule):
 
         # create the pytorch optimizer object
         optim_groups = [
-            {"params": [param_dict[pn] for pn in sorted(list(decay))], "weight_decay": 0.0},
+            {"params": [param_dict[pn] for pn in sorted(list(decay))], "weight_decay": self.train_config.weight_decay},
             {"params": [param_dict[pn] for pn in sorted(list(no_decay))], "weight_decay": 0.0},
         ]
         betas = (0.9, 0.99)
@@ -204,7 +204,7 @@ class LightningModule(pl.LightningModule):
         sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
         sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
         loss_input = sum_embeddings / sum_mask
-        pred = self.net.forward(loss_input).squeeze()
+        pred = self.net.forward(loss_input)
         if not train and self.config.task_type == 'binary':
             pred = torch.sigmoid(pred)
         if pred.ndim == 0:
@@ -216,7 +216,7 @@ class MolFormer:
     def __init__(self, save_dir: str, pretrained_path: str, 
                  task_type: Literal["regression", "binary"] = "regression", num_tasks: int = 1,
                  n_head: int = 12, n_layer: int = 12, n_embd: int = 768, d_dropout: float = 0.1, 
-                 dropout: float = 0.1, learning_rate: float = 3e-5, num_feats: int = 32,
+                 dropout: float = 0.1, learning_rate: float = 3e-5, num_feats: int = 32, weight_decay: float = 0.0,
                  ensemble_size: int = 1, epochs: int = 50, batch_size: int = 128, 
                  num_workers: int = 8, seed: int = 0,):
         self.save_dir = save_dir
@@ -226,7 +226,7 @@ class MolFormer:
         hparams = {
             'mode': 'avg',
             'n_head': n_head, 'n_layer': n_layer, 'n_embd': n_embd,
-            'd_dropout': d_dropout, 'dropout': dropout, 'num_feats': num_feats,
+            'd_dropout': d_dropout, 'dropout': dropout, 'num_feats': num_feats, 'weight_decay': weight_decay,
             'lr_start': learning_rate, 'lr_multiplier': 1, 'task_type': task_type,
             'num_tasks': num_tasks
         }
@@ -253,13 +253,13 @@ class MolFormer:
         
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-
         train_data_loader = self.get_dataloader(train_data)
         df_loss = pd.DataFrame({})
         self.models = []
         for model_idx in range(self.ensemble_size):
             pl.seed_everything(self.seed + model_idx)
             model = self.create_model()
+            model.train()
             optimizer = model.configure_optimizers()
             losses = []
             for i in trange(self.epochs):
@@ -296,7 +296,7 @@ class MolFormer:
                     pred, true = model(batch, train=False)
                     preds.append(pred.detach().cpu().numpy())
                 predictions.append(np.concatenate(preds))
-        predictions = np.mean(predictions, axis=0).ravel()
+        predictions = np.mean(predictions, axis=0)
         return predictions
 
     def predict_uncertainty(self, pred_data):
@@ -310,16 +310,24 @@ class MolFormer:
 
     def get_dataloader(self, data, shuffle: bool = True):
         assert data.X_smiles.shape[1] == 1, "Only single-column SMILES data is supported for RNN models."
-        assert data.y.shape[1] == 1, "Only single-column target data is supported for RNN models."
+        # assert data.y.shape[1] == 1, "Only single-column target data is supported for RNN models."
         data_ = MolFormerDataset(
             smiles_list=data.X_smiles.ravel().tolist(),
-            targets=data.y.ravel().tolist(),
+            targets=data.y,
         )
 
         def collate(batch):
-            tokens = self.tokenizer.batch_encode_plus([ smile[0] for smile in batch], padding=True, add_special_tokens=True)
-            return (torch.tensor(tokens['input_ids']), torch.tensor(tokens['attention_mask']), torch.tensor([smile[1] for smile in batch]))
-        
+            tokens = self.tokenizer.batch_encode_plus(
+                [smile[0] for smile in batch], 
+                padding=True, 
+                add_special_tokens=True
+            )
+            return (
+                torch.tensor(tokens['input_ids']), 
+                torch.tensor(tokens['attention_mask']), 
+                torch.tensor(np.array([smile[1] for smile in batch]))
+            )
+
         return DataLoader(
             data_,
             batch_size=self.batch_size,
@@ -355,16 +363,27 @@ class MolFormer:
             The average loss for the epoch.
         """
         
-        model.train()
         epoch_loss = 0
         for batch in train_data_loader:
             batch = list(batch)
             for i in range(3):
                 batch[i] = batch[i].to(self.device)
-            optimizer.zero_grad()
             pred, true = model(batch)
-            loss = model.loss(pred, true)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.detach().to('cpu').item()
+
+            # Create mask to exclude NaN values
+            mask = ~torch.isnan(true)
+            
+            # Only compute loss on non-NaN values
+            if mask.any():
+                # Apply mask BEFORE computing loss
+                masked_pred = pred[mask]
+                masked_true = true[mask]
+                
+                loss = model.loss(masked_pred, masked_true)
+                loss = loss.sum() / mask.sum()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.detach().cpu().item()
+
         return epoch_loss / len(train_data_loader)

@@ -24,6 +24,7 @@ def molformer_cv(arguments=None):
         ensemble_size=args.ensemble_size,
         epochs=args.epochs,
         batch_size=args.batch_size,
+        weight_decay=args.weight_decay,
         num_workers=args.n_jobs,
         seed=args.seed
     )
@@ -62,42 +63,46 @@ def molformer_optuna(arguments=None):
             # 'num_feats': trial.suggest_categorical('num_feats', [16, 32, 64, 128]),
             'batch_size': trial.suggest_categorical('batch_size', [32, 64, 128, 256]),
             'epochs': trial.suggest_categorical('epochs', [10, 30, 50, 100, 200]),
+            'weight_decay': trial.suggest_categorical('weight_decay', [0.0, 1e-5, 1e-4, 1e-3]),
         }
-        model = MolFormer(save_dir='%s/trial-%d' % (args.save_dir, trial.number), 
-                          task_type=args.task_type, num_tasks=len(args.targets_columns),
-                          num_workers=args.n_jobs, seed=args.seed,
-                          **params)
-        evaluator = Evaluator(save_dir='%s/trial-%d' % (args.save_dir, trial.number),
-                            dataset=args.dataset,
-                            model=model,
-                            task_type=args.task_type,
-                            metrics=args.metrics,
-                            cross_validation=args.cross_validation,
-                            n_splits=args.n_splits,
-                            split_type=args.split_type,
-                            split_sizes=args.split_sizes,
-                            num_folds=args.num_folds,
-                            seed=args.seed)
-        if args.separate_val_path is not None:
-            if args.separate_test_path is not None:
-                evaluator1 = Evaluator(save_dir='%s/trial-%d' % (args.save_dir, trial.number),
-                                        dataset=args.dataset_train_val,
-                                        model=model,
-                                        task_type=args.task_type,
-                                        metrics=args.metrics,
-                                        cross_validation=args.cross_validation,
-                                        n_splits=args.n_splits,
-                                        split_type=args.split_type,
-                                        split_sizes=args.split_sizes,
-                                        num_folds=args.num_folds,
-                                        seed=args.seed)
-                evaluator1.run_external(args.dataset_test, name='test')
-                evaluator.run_external(args.dataset_test, name='test_train_only')
-            return evaluator.run_external(args.dataset_val, name='val')
-        else:
-            if args.separate_test_path is not None:
-                evaluator.run_external(args.dataset_test, name='test')
-            return evaluator.run_cross_validation()
+        try:
+            model = MolFormer(save_dir='%s/trial-%d' % (args.save_dir, trial.number), 
+                            task_type=args.task_type, num_tasks=len(args.targets_columns),
+                            num_workers=args.n_jobs, seed=args.seed,
+                            **params)
+            evaluator = Evaluator(save_dir='%s/trial-%d' % (args.save_dir, trial.number),
+                                dataset=args.dataset,
+                                model=model,
+                                task_type=args.task_type,
+                                metrics=args.metrics,
+                                cross_validation=args.cross_validation,
+                                n_splits=args.n_splits,
+                                split_type=args.split_type,
+                                split_sizes=args.split_sizes,
+                                num_folds=args.num_folds,
+                                seed=args.seed)
+            if args.separate_val_path is not None:
+                if args.separate_test_path is not None:
+                    evaluator1 = Evaluator(save_dir='%s/trial-%d' % (args.save_dir, trial.number),
+                                            dataset=args.dataset_train_val,
+                                            model=model,
+                                            task_type=args.task_type,
+                                            metrics=args.metrics,
+                                            cross_validation=args.cross_validation,
+                                            n_splits=args.n_splits,
+                                            split_type=args.split_type,
+                                            split_sizes=args.split_sizes,
+                                            num_folds=args.num_folds,
+                                            seed=args.seed)
+                    evaluator1.run_external(args.dataset_test, name='test')
+                    evaluator.run_external(args.dataset_test, name='test_train_only')
+                return evaluator.run_external(args.dataset_val, name='val')
+            else:
+                if args.separate_test_path is not None:
+                    evaluator.run_external(args.dataset_test, name='test')
+                return evaluator.run_cross_validation()
+        except:
+            return float('inf') if args.task_type == 'regression' else float('-inf')
 
     study = optuna.create_study(
         study_name="optuna-study",
