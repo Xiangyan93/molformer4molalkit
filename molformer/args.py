@@ -84,7 +84,7 @@ class TrainArgs(Tap):
 
     def process_args(self) -> None:
         if self.pretrained_path is None:
-            self.pretrained_path = AVAILABLE_CHECKPOINTS[1]
+            self.pretrained_path = os.path.join(CWD, 'checkpoints', 'N-Step-Checkpoint_3_30000.ckpt')
         self.dataset = Dataset.from_df(
             df=self.get_df(self.data_path),
             smiles_columns=self.smiles_columns,

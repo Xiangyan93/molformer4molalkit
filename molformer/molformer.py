@@ -309,7 +309,7 @@ class MolFormer:
             return (0.25 - np.var(preds, axis=1)) * 4
 
     def get_dataloader(self, data, shuffle: bool = True):
-        assert data.X_smiles.shape[1] == 1, "Only single-column SMILES data is supported for RNN models."
+        assert data.X_smiles.shape[1] == 1, "Only single-column SMILES data is supported for MolFormer."
         # assert data.y.shape[1] == 1, "Only single-column target data is supported for RNN models."
         data_ = MolFormerDataset(
             smiles_list=data.X_smiles.ravel().tolist(),

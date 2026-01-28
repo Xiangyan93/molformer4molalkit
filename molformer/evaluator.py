@@ -71,7 +71,7 @@ class Evaluator:
                  save_dir: str,
                  dataset: Dataset,
                  model,
-                 task_type: Literal["regression", "classification", "multi-class"],
+                 task_type: Literal["regression", "binary", "multi-class"],
                  metrics: List[Metric] = None,
                  cross_validation: Literal["kFold", "Monte-Carlo", "no"] = "Monte-Carlo",
                  n_splits: int = None,
@@ -224,7 +224,7 @@ class Evaluator:
         y_pred = y_pred[mask]
         if self.task_type == "regression":
             return metric_regression(y, y_pred, metric)
-        elif self.task_type == "classification":
+        elif self.task_type == "binary":
             return metric_binary(y, y_pred, metric)
         elif self.task_type == "multi-class":
             raise NotImplementedError("multi-class classification is not supported yet.")

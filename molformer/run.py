@@ -101,7 +101,7 @@ def molformer_optuna(arguments=None):
                 if args.separate_test_path is not None:
                     evaluator.run_external(args.dataset_test, name='test')
                 return evaluator.run_cross_validation()
-        except:
+        except Exception:
             return float('inf') if args.task_type == 'regression' else float('-inf')
 
     study = optuna.create_study(
