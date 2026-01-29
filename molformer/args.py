@@ -27,6 +27,8 @@ class TrainArgs(Tap):
     """
     Name of the columns containing target values.
     """
+    features_columns: List[str] = None
+    """List of names of the columns containing additional float features."""
     task_type: Literal["regression", "binary", "multi-class"]
     """Type of task."""
     cross_validation: Literal["kFold", "leave-one-out", "Monte-Carlo", "no"] = "no"
@@ -73,6 +75,10 @@ class TrainArgs(Tap):
     """Weight decay (L2 regularization) factor."""
 
     @property
+    def n_features(self) -> int:
+        return len(self.features_columns) if self.features_columns else 0
+
+    @property
     def metrics(self) -> List[Metric]:
         return [self.metric] + self.extra_metrics
     
@@ -88,7 +94,7 @@ class TrainArgs(Tap):
         self.dataset = Dataset.from_df(
             df=self.get_df(self.data_path),
             smiles_columns=self.smiles_columns,
-            features_columns=None,
+            features_columns=self.features_columns,
             targets_columns=self.targets_columns,
             n_jobs=self.n_jobs,
         )
@@ -99,7 +105,7 @@ class TrainArgs(Tap):
             self.dataset_test = Dataset.from_df(
                 df=self.get_df(self.separate_test_path),
                 smiles_columns=self.smiles_columns,
-                features_columns=None,
+                features_columns=self.features_columns,
                 targets_columns=self.targets_columns,
                 n_jobs=self.n_jobs,
             )
@@ -110,7 +116,7 @@ class TrainArgs(Tap):
             self.dataset_val = Dataset.from_df(
                 df=self.get_df(self.separate_val_path),
                 smiles_columns=self.smiles_columns,
-                features_columns=None,
+                features_columns=self.features_columns,
                 targets_columns=self.targets_columns,
                 n_jobs=self.n_jobs,
             )

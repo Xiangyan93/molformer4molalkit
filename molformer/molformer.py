@@ -61,16 +61,22 @@ class LightningModule(pl.LightningModule):
             self.loss = torch.nn.L1Loss(reduction="none")
         elif config.task_type == 'binary':
             self.loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+        self.n_features = getattr(config, 'n_features', 0)
         self.net = self.Net(
             config.n_embd, config.num_tasks, dropout=config.dropout,
+            n_features=self.n_features,
         )
 
     class Net(nn.Module):
-        def __init__(self, smiles_embed_dim, num_tasks, dropout=0.2):
+        def __init__(self, smiles_embed_dim, num_tasks, dropout=0.2, n_features=0):
             super().__init__()
-            self.desc_skip_connection = True 
+            self.desc_skip_connection = True
             self.fcs = []  # nn.ModuleList()
+            self.n_features = n_features
             print('dropout is {}'.format(dropout))
+
+            if n_features > 0:
+                self.features_proj = nn.Linear(smiles_embed_dim + n_features, smiles_embed_dim)
 
             self.fc1 = nn.Linear(smiles_embed_dim, smiles_embed_dim)
             self.dropout1 = nn.Dropout(dropout)
@@ -80,7 +86,9 @@ class LightningModule(pl.LightningModule):
             self.relu2 = nn.GELU()
             self.final = nn.Linear(smiles_embed_dim, num_tasks)
 
-        def forward(self, smiles_emb):
+        def forward(self, smiles_emb, features=None):
+            if self.n_features > 0 and features is not None:
+                smiles_emb = self.features_proj(torch.cat([smiles_emb, features], dim=-1))
             x_out = self.fc1(smiles_emb)
             x_out = self.dropout1(x_out)
             x_out = self.relu1(x_out)
@@ -195,6 +203,7 @@ class LightningModule(pl.LightningModule):
         idx = batch[0]
         mask = batch[1]
         targets = batch[-1]
+        features = batch[2] if len(batch) == 4 else None
         # b, t = idx.size()
         token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
         x = self.drop(token_embeddings)
@@ -204,7 +213,7 @@ class LightningModule(pl.LightningModule):
         sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
         sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
         loss_input = sum_embeddings / sum_mask
-        pred = self.net.forward(loss_input)
+        pred = self.net.forward(loss_input, features=features)
         if not train and self.config.task_type == 'binary':
             pred = torch.sigmoid(pred)
         if pred.ndim == 0:
@@ -213,22 +222,23 @@ class LightningModule(pl.LightningModule):
 
 
 class MolFormer:
-    def __init__(self, save_dir: str, pretrained_path: str, 
+    def __init__(self, save_dir: str, pretrained_path: str,
                  task_type: Literal["regression", "binary"] = "regression", num_tasks: int = 1,
-                 n_head: int = 12, n_layer: int = 12, n_embd: int = 768, d_dropout: float = 0.1, 
+                 n_head: int = 12, n_layer: int = 12, n_embd: int = 768, d_dropout: float = 0.1,
                  dropout: float = 0.1, learning_rate: float = 3e-5, num_feats: int = 32, weight_decay: float = 0.0,
-                 ensemble_size: int = 1, epochs: int = 50, batch_size: int = 128, 
-                 num_workers: int = 8, seed: int = 0,):
+                 ensemble_size: int = 1, epochs: int = 50, batch_size: int = 128,
+                 num_workers: int = 8, seed: int = 0, n_features: int = 0):
         self.save_dir = save_dir
         self.pretrained_path = pretrained_path
         assert os.path.exists(pretrained_path), f"Pretrained model {pretrained_path} not found. Please download it from https://github.com/IBM/molformer"
+        self.n_features = n_features
         self.tokenizer = MolTranBertTokenizer(os.path.join(CWD, 'bert_vocab.txt'))
         hparams = {
             'mode': 'avg',
             'n_head': n_head, 'n_layer': n_layer, 'n_embd': n_embd,
             'd_dropout': d_dropout, 'dropout': dropout, 'num_feats': num_feats, 'weight_decay': weight_decay,
             'lr_start': learning_rate, 'lr_multiplier': 1, 'task_type': task_type,
-            'num_tasks': num_tasks
+            'num_tasks': num_tasks, 'n_features': n_features,
         }
         self.hparams = argparse.Namespace(**hparams)
         self.task_type = task_type
@@ -291,7 +301,7 @@ class MolFormer:
                 model.eval()
                 for batch in test_data_loader:
                     batch = list(batch)
-                    for i in range(3):
+                    for i in range(len(batch)):
                         batch[i] = batch[i].to(self.device)
                     pred, true = model(batch, train=False)
                     preds.append(pred.detach().cpu().numpy())
@@ -310,22 +320,33 @@ class MolFormer:
 
     def get_dataloader(self, data, shuffle: bool = True):
         assert data.X_smiles.shape[1] == 1, "Only single-column SMILES data is supported for MolFormer."
-        # assert data.y.shape[1] == 1, "Only single-column target data is supported for RNN models."
+        features = None
+        if self.n_features > 0 and hasattr(data, 'X_features') and data.X_features is not None:
+            features = data.X_features
         data_ = MolFormerDataset(
             smiles_list=data.X_smiles.ravel().tolist(),
             targets=data.y,
+            features=features,
         )
+        has_features = features is not None
 
         def collate(batch):
-            tokens = self.tokenizer.batch_encode_plus(
-                [smile[0] for smile in batch], 
-                padding=True, 
+            tokens = self.tokenizer(
+                [item[0] for item in batch],
+                padding=True,
                 add_special_tokens=True
             )
+            if has_features:
+                return (
+                    torch.tensor(tokens['input_ids']),
+                    torch.tensor(tokens['attention_mask']),
+                    torch.tensor(np.array([item[1] for item in batch]), dtype=torch.float32),
+                    torch.tensor(np.array([item[2] for item in batch]))
+                )
             return (
-                torch.tensor(tokens['input_ids']), 
-                torch.tensor(tokens['attention_mask']), 
-                torch.tensor(np.array([smile[1] for smile in batch]))
+                torch.tensor(tokens['input_ids']),
+                torch.tensor(tokens['attention_mask']),
+                torch.tensor(np.array([item[1] for item in batch]))
             )
 
         return DataLoader(
@@ -337,12 +358,13 @@ class MolFormer:
         )
 
     def create_model(self):
-        return LightningModule.load_from_checkpoint(self.pretrained_path, 
-                                                    strict=False, 
-                                                    config=self.hparams, 
-                                                    tokenizer=self.tokenizer, 
+        return LightningModule.load_from_checkpoint(self.pretrained_path,
+                                                    strict=False,
+                                                    config=self.hparams,
+                                                    tokenizer=self.tokenizer,
                                                     vocab=len(self.tokenizer.vocab),
-                                                    task_type=self.task_type).to(self.device)
+                                                    task_type=self.task_type,
+                                                    weights_only=False).to(self.device)
 
     def train_epoch(self, train_data_loader, model, optimizer):
         """
@@ -366,7 +388,7 @@ class MolFormer:
         epoch_loss = 0
         for batch in train_data_loader:
             batch = list(batch)
-            for i in range(3):
+            for i in range(len(batch)):
                 batch[i] = batch[i].to(self.device)
             pred, true = model(batch)
 

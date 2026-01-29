@@ -27,6 +27,7 @@ def _make_fake_args(cls_name="TrainArgs", **overrides):
     args.weight_decay = 0.0
     args.n_jobs = 1
     args.seed = 0
+    args.n_features = 0
     args.metrics = ["rmse"]
     args.cross_validation = "kFold"
     args.n_splits = 5
@@ -68,8 +69,8 @@ _MOCK_MODULES = [
 
 _saved = {}
 for mod_name in _MOCK_MODULES:
+    _saved[mod_name] = sys.modules.get(mod_name)
     if mod_name not in sys.modules:
-        _saved[mod_name] = None
         sys.modules[mod_name] = MagicMock()
 
 # scipy's is_torch_array does issubclass(x, torch.Tensor) which fails if
@@ -88,6 +89,19 @@ _mock_OptunaArgs = MagicMock()
 
 # Patch at module level before import
 import molformer.run as run_module
+
+
+def teardown_module():
+    """Remove mock modules so integration tests can use real dependencies."""
+    for mod_name in _MOCK_MODULES:
+        if _saved[mod_name] is None:
+            sys.modules.pop(mod_name, None)
+        else:
+            sys.modules[mod_name] = _saved[mod_name]
+    # Also remove cached molformer submodules so they get re-imported with real deps
+    for key in list(sys.modules):
+        if key.startswith("molformer"):
+            del sys.modules[key]
 
 # ---------------------------------------------------------------------------
 # molformer_cv tests

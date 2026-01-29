@@ -26,7 +26,8 @@ def molformer_cv(arguments=None):
         batch_size=args.batch_size,
         weight_decay=args.weight_decay,
         num_workers=args.n_jobs,
-        seed=args.seed
+        seed=args.seed,
+        n_features=args.n_features,
     )
     evaluator = Evaluator(
         save_dir=args.save_dir,
@@ -66,9 +67,10 @@ def molformer_optuna(arguments=None):
             'weight_decay': trial.suggest_categorical('weight_decay', [0.0, 1e-5, 1e-4, 1e-3]),
         }
         try:
-            model = MolFormer(save_dir='%s/trial-%d' % (args.save_dir, trial.number), 
+            model = MolFormer(save_dir='%s/trial-%d' % (args.save_dir, trial.number),
                             task_type=args.task_type, num_tasks=len(args.targets_columns),
                             num_workers=args.n_jobs, seed=args.seed,
+                            n_features=args.n_features,
                             **params)
             evaluator = Evaluator(save_dir='%s/trial-%d' % (args.save_dir, trial.number),
                                 dataset=args.dataset,

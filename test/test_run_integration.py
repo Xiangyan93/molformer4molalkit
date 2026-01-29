@@ -41,6 +41,11 @@ _TARGETS = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
 
 _BINARY_TARGETS = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
 
+_FEATURES = [
+    [0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8], [0.9, 1.0],
+    [1.1, 1.2], [1.3, 1.4], [1.5, 1.6], [1.7, 1.8], [1.9, 2.0],
+]
+
 
 def _write_csv(path, smiles, targets, target_col="target"):
     """Write a minimal CSV with smiles and target columns."""
@@ -49,6 +54,15 @@ def _write_csv(path, smiles, targets, target_col="target"):
         writer.writerow(["smiles", target_col])
         for s, t in zip(smiles, targets):
             writer.writerow([s, t])
+
+
+def _write_csv_with_features(path, smiles, targets, features):
+    """Write a CSV with smiles, feature columns, and target."""
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["smiles", "feat1", "feat2", "target"])
+        for s, feats, t in zip(smiles, features, targets):
+            writer.writerow([s, feats[0], feats[1], t])
 
 
 @pytest.fixture
@@ -69,6 +83,13 @@ def regression_csv(tmp_dir):
 def binary_csv(tmp_dir):
     path = os.path.join(tmp_dir, "data_bin.csv")
     _write_csv(path, _SMILES, _BINARY_TARGETS)
+    return path
+
+
+@pytest.fixture
+def features_csv(tmp_dir):
+    path = os.path.join(tmp_dir, "features_data.csv")
+    _write_csv_with_features(path, _SMILES, _TARGETS, _FEATURES)
     return path
 
 
@@ -149,6 +170,30 @@ class TestMolformerCVIntegration:
 
         assert os.path.exists(os.path.join(save_dir, "test_ext_prediction.csv"))
         assert os.path.exists(os.path.join(save_dir, "test_ext_metrics.csv"))
+
+    def test_kfold_regression_with_features(self, tmp_dir, features_csv):
+        from molformer.run import molformer_cv
+
+        save_dir = os.path.join(tmp_dir, "kfold_features_out")
+        molformer_cv([
+            "--data_path", features_csv,
+            "--smiles_columns", "smiles",
+            "--targets_columns", "target",
+            "--features_columns", "feat1", "feat2",
+            "--task_type", "regression",
+            "--metric", "rmse",
+            "--cross_validation", "kFold",
+            "--n_splits", "2",
+            "--num_folds", "1",
+            "--epochs", "1",
+            "--batch_size", "5",
+            "--ensemble_size", "1",
+            "--n_jobs", "1",
+            "--save_dir", save_dir,
+        ])
+
+        assert os.path.isdir(save_dir)
+        assert os.path.exists(os.path.join(save_dir, "kFold_metrics.csv"))
 
     def test_binary_kfold(self, tmp_dir, binary_csv):
         from molformer.run import molformer_cv
