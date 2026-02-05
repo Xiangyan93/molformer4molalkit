@@ -1,4 +1,5 @@
 import os
+from typing import List, Optional
 import optuna
 from optuna.samplers import TPESampler
 from molformer.args import TrainArgs, OptunaArgs
@@ -7,14 +8,42 @@ from molformer.evaluator import Evaluator
 from molformer.molformer import MolFormer
 
 
+def get_no_scale_indices(args: TrainArgs) -> Optional[List[int]]:
+    """
+    Compute feature indices that should not be scaled because they come from
+    rdkit_2d_normalized (which is already pre-normalized).
+
+    Features are concatenated in order: features_columns first, then generator
+    features (in the order of --features_generators_name). This function identifies
+    the index range belonging to rdkit_2d_normalized generators.
+
+    :param args: A TrainArgs object containing features configuration.
+    :return: A list of feature indices to skip during scaling, or None.
+    """
+    if args.features_generators_name is None or 'rdkit_2d_normalized' not in args.features_generators_name:
+        return None
+
+    pre_loaded_size = len(args.features_columns) if args.features_columns else 0
+    offset = pre_loaded_size
+    no_scale = []
+
+    for fg_name, size in zip(args.features_generators_name, args.generator_feature_sizes):
+        if fg_name == 'rdkit_2d_normalized':
+            no_scale.extend(range(offset, offset + size))
+        offset += size
+
+    return no_scale if no_scale else None
+
+
 def molformer_cv(arguments=None):
     args = TrainArgs().parse_args(arguments)
+    no_scale_indices = get_no_scale_indices(args)
     model = MolFormer(
         save_dir=args.save_dir,
         pretrained_path=args.pretrained_path,
         task_type=args.task_type,
         num_tasks=len(args.targets_columns),
-        n_head=args.n_head, 
+        n_head=args.n_head,
         n_layer=args.n_layer,
         n_embd=args.n_embd,
         d_dropout=args.d_dropout,
@@ -29,6 +58,7 @@ def molformer_cv(arguments=None):
         seed=args.seed,
         n_features=args.n_features,
         features_scaling=args.features_scaling,
+        no_scale_indices=no_scale_indices,
     )
     evaluator = Evaluator(
         save_dir=args.save_dir,
@@ -53,6 +83,8 @@ def molformer_cv(arguments=None):
 def molformer_optuna(arguments=None):
     args = OptunaArgs().parse_args(arguments)
     os.makedirs(args.save_dir, exist_ok=True)
+    no_scale_indices = get_no_scale_indices(args)
+
     def objective(trial):
         params = {
             'pretrained_path': trial.suggest_categorical('pretrained_path', AVAILABLE_CHECKPOINTS),
@@ -73,6 +105,7 @@ def molformer_optuna(arguments=None):
                             num_workers=args.n_jobs, seed=args.seed,
                             n_features=args.n_features,
                             features_scaling=args.features_scaling,
+                            no_scale_indices=no_scale_indices,
                             **params)
             evaluator = Evaluator(save_dir='%s/trial-%d' % (args.save_dir, trial.number),
                                 dataset=args.dataset,

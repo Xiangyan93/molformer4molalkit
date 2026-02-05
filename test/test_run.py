@@ -28,6 +28,8 @@ def _make_fake_args(cls_name="TrainArgs", **overrides):
     args.n_jobs = 1
     args.seed = 0
     args.n_features = 0
+    args.features_scaling = True
+    args.no_scale_indices = None
     args.metrics = ["rmse"]
     args.cross_validation = "kFold"
     args.n_splits = 5
@@ -236,3 +238,84 @@ class TestMolformerOptuna:
 
         call_kwargs = self.mock_optuna.create_study.call_args[1]
         assert call_kwargs["direction"] == "maximize"
+
+
+# ---------------------------------------------------------------------------
+# get_no_scale_indices function tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetNoScaleIndices:
+    """Test the get_no_scale_indices function for selective feature scaling."""
+
+    def test_no_scale_indices_none_when_no_generators(self):
+        """When no features_generators_name, no_scale_indices should be None."""
+        from molformer.args import TrainArgs
+        from molformer.run import get_no_scale_indices
+
+        args = TrainArgs()
+        args.features_generators_name = None
+        args.features_columns = None
+
+        assert get_no_scale_indices(args) is None
+
+    def test_no_scale_indices_none_when_no_rdkit_2d_normalized(self):
+        """When rdkit_2d_normalized not in generators, no_scale_indices should be None."""
+        from molformer.args import TrainArgs
+        from molformer.run import get_no_scale_indices
+
+        args = TrainArgs()
+        args.features_generators_name = ['rdkit_2d']
+        args.features_columns = None
+
+        assert get_no_scale_indices(args) is None
+
+    def test_no_scale_indices_rdkit_2d_normalized_only(self):
+        """When only rdkit_2d_normalized is used, indices 0-199 should be skipped."""
+        from molformer.args import TrainArgs
+        from molformer.run import get_no_scale_indices
+
+        args = TrainArgs()
+        args.features_generators_name = ['rdkit_2d_normalized']
+        args.features_columns = None
+
+        assert get_no_scale_indices(args) == list(range(0, 200))
+
+    def test_no_scale_indices_with_features_columns(self):
+        """rdkit_2d_normalized indices should be offset by features_columns count."""
+        from molformer.args import TrainArgs
+        from molformer.run import get_no_scale_indices
+
+        args = TrainArgs()
+        args.features_generators_name = ['rdkit_2d_normalized']
+        args.features_columns = ['feat1', 'feat2', 'feat3']
+
+        # 3 features_columns first, then rdkit_2d_normalized (200 features)
+        assert get_no_scale_indices(args) == list(range(3, 203))
+
+    def test_no_scale_indices_mixed_generators(self):
+        """When mixed generators, only rdkit_2d_normalized indices should be skipped."""
+        from molformer.args import TrainArgs
+        from molformer.run import get_no_scale_indices
+
+        args = TrainArgs()
+        args.features_generators_name = ['rdkit_2d', 'rdkit_2d_normalized', 'morgan']
+        args.features_columns = ['feat1']
+
+        # features_columns: 1 (indices 0)
+        # rdkit_2d: 200 (indices 1-200)
+        # rdkit_2d_normalized: 200 (indices 201-400) <- these should be skipped
+        # morgan: 2048 (indices 401-2448)
+        expected = list(range(201, 401))
+        assert get_no_scale_indices(args) == expected
+
+    def test_n_features_property(self):
+        """Verify n_features property correctly sums all feature sizes."""
+        from molformer.args import TrainArgs
+
+        args = TrainArgs()
+        args.features_generators_name = ['rdkit_2d', 'rdkit_2d_normalized']
+        args.features_columns = ['feat1', 'feat2']
+
+        # 2 features_columns + 200 (rdkit_2d) + 200 (rdkit_2d_normalized) = 402
+        assert args.n_features == 402

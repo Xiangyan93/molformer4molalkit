@@ -86,16 +86,30 @@ class TrainArgs(Tap):
         return [FeaturesGenerator(features_generator_name=fg) for fg in self.features_generators_name]
 
     @property
+    def generator_feature_sizes(self) -> Optional[List[int]]:
+        """Compute feature sizes for each generator using a dummy molecule."""
+        if self.features_generators_name is None:
+            return None
+        dummy_mol = Chem.MolFromSmiles('C')
+        sizes = []
+        for fg_name in self.features_generators_name:
+            fg = FeaturesGenerator(features_generator_name=fg_name)
+            sizes.append(len(fg(dummy_mol)))
+        return sizes
+
+    @property
+    def n_generator_features(self) -> int:
+        """Total number of generator features across all molecules."""
+        sizes = self.generator_feature_sizes
+        if sizes is None:
+            return 0
+        n_smiles = len(self.smiles_columns) if self.smiles_columns else 1
+        return sum(sizes) * n_smiles
+
+    @property
     def n_features(self) -> int:
         n = len(self.features_columns) if self.features_columns else 0
-        if self.features_generators_name is not None:
-            for fg in self.features_generators_name:
-                if fg in ('rdkit_2d', 'rdkit_2d_normalized'):
-                    n += 200
-                elif fg in ('morgan', 'morgan_count'):
-                    n += 2048
-                else:
-                    raise ValueError(f"Unknown features generator: {fg}")
+        n += self.n_generator_features
         return n
 
     @property
