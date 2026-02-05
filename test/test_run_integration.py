@@ -41,6 +41,20 @@ _TARGETS = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
 
 _BINARY_TARGETS = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
 
+# Multi-task targets with missing values (NaN)
+_MULTI_TARGETS = [
+    [1.0, 2.0],
+    [2.0, None],  # missing value for task 1
+    [3.0, 4.0],
+    [4.0, None],  # missing value for task 1
+    [5.0, 6.0],
+    [6.0, 7.0],
+    [7.0, None],  # missing value for task 1
+    [8.0, 9.0],
+    [9.0, 10.0],
+    [10.0, 11.0],
+]
+
 _FEATURES = [
     [0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8], [0.9, 1.0],
     [1.1, 1.2], [1.3, 1.4], [1.5, 1.6], [1.7, 1.8], [1.9, 2.0],
@@ -63,6 +77,17 @@ def _write_csv_with_features(path, smiles, targets, features):
         writer.writerow(["smiles", "feat1", "feat2", "target"])
         for s, feats, t in zip(smiles, features, targets):
             writer.writerow([s, feats[0], feats[1], t])
+
+
+def _write_multitask_csv(path, smiles, multi_targets):
+    """Write a CSV with smiles and multiple target columns (may contain None for missing)."""
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["smiles", "target1", "target2"])
+        for s, targets in zip(smiles, multi_targets):
+            # Convert None to empty string for CSV (will be read as NaN)
+            row = [s] + [t if t is not None else "" for t in targets]
+            writer.writerow(row)
 
 
 @pytest.fixture
@@ -98,6 +123,14 @@ def ext_test_csv(tmp_dir):
     """A separate small test set."""
     path = os.path.join(tmp_dir, "test.csv")
     _write_csv(path, _SMILES[:3], _TARGETS[:3])
+    return path
+
+
+@pytest.fixture
+def multitask_csv(tmp_dir):
+    """Multi-task CSV with missing values."""
+    path = os.path.join(tmp_dir, "multitask.csv")
+    _write_multitask_csv(path, _SMILES, _MULTI_TARGETS)
     return path
 
 
@@ -195,6 +228,30 @@ class TestMolformerCVIntegration:
         assert os.path.isdir(save_dir)
         assert os.path.exists(os.path.join(save_dir, "kFold_metrics.csv"))
 
+    def test_kfold_regression_with_features_generators(self, tmp_dir, regression_csv):
+        from molformer.run import molformer_cv
+
+        save_dir = os.path.join(tmp_dir, "kfold_fg_out")
+        molformer_cv([
+            "--data_path", regression_csv,
+            "--smiles_columns", "smiles",
+            "--targets_columns", "target",
+            "--features_generators_name", "rdkit_2d_normalized",
+            "--task_type", "regression",
+            "--metric", "rmse",
+            "--cross_validation", "kFold",
+            "--n_splits", "2",
+            "--num_folds", "1",
+            "--epochs", "1",
+            "--batch_size", "5",
+            "--ensemble_size", "1",
+            "--n_jobs", "1",
+            "--save_dir", save_dir,
+        ])
+
+        assert os.path.isdir(save_dir)
+        assert os.path.exists(os.path.join(save_dir, "kFold_metrics.csv"))
+
     def test_binary_kfold(self, tmp_dir, binary_csv):
         from molformer.run import molformer_cv
 
@@ -216,6 +273,40 @@ class TestMolformerCVIntegration:
         ])
 
         assert os.path.exists(os.path.join(save_dir, "kFold_metrics.csv"))
+
+    def test_multitask_with_missing_values(self, tmp_dir, multitask_csv):
+        """Test multi-task learning with missing values in targets."""
+        import pandas as pd
+        from molformer.run import molformer_cv
+
+        save_dir = os.path.join(tmp_dir, "multitask_out")
+        molformer_cv([
+            "--data_path", multitask_csv,
+            "--smiles_columns", "smiles",
+            "--targets_columns", "target1", "target2",
+            "--task_type", "regression",
+            "--metric", "rmse",
+            "--cross_validation", "kFold",
+            "--n_splits", "2",
+            "--num_folds", "1",
+            "--epochs", "1",
+            "--batch_size", "5",
+            "--ensemble_size", "1",
+            "--n_jobs", "1",
+            "--save_dir", save_dir,
+        ])
+
+        # Verify metrics file exists and has correct structure
+        metrics_path = os.path.join(save_dir, "kFold_metrics.csv")
+        assert os.path.exists(metrics_path)
+
+        df_metrics = pd.read_csv(metrics_path)
+        # Should have n_samples column for weighted averaging
+        assert "n_samples" in df_metrics.columns
+        # Task 0 (target1) should have more samples than Task 1 (target2)
+        task0_samples = df_metrics[df_metrics["no_targets_columns"] == 0]["n_samples"].sum()
+        task1_samples = df_metrics[df_metrics["no_targets_columns"] == 1]["n_samples"].sum()
+        assert task0_samples > task1_samples, "Task 0 should have more samples than Task 1"
 
 
 class TestMolformerOptunaIntegration:

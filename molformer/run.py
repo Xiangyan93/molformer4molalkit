@@ -28,6 +28,7 @@ def molformer_cv(arguments=None):
         num_workers=args.n_jobs,
         seed=args.seed,
         n_features=args.n_features,
+        features_scaling=args.features_scaling,
     )
     evaluator = Evaluator(
         save_dir=args.save_dir,
@@ -71,6 +72,7 @@ def molformer_optuna(arguments=None):
                             task_type=args.task_type, num_tasks=len(args.targets_columns),
                             num_workers=args.n_jobs, seed=args.seed,
                             n_features=args.n_features,
+                            features_scaling=args.features_scaling,
                             **params)
             evaluator = Evaluator(save_dir='%s/trial-%d' % (args.save_dir, trial.number),
                                 dataset=args.dataset,

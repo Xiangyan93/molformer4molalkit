@@ -7,6 +7,7 @@ from sklearn.model_selection import KFold
 from rdkit import Chem
 from mgktools.data.data import Dataset
 from mgktools.evaluators.cross_validation import Metric
+from mgktools.features_mol.features_generators import FeaturesGenerator
 from molformer.checkpoints import AVAILABLE_CHECKPOINTS
 CWD = os.path.dirname(__file__)
 
@@ -29,6 +30,8 @@ class TrainArgs(Tap):
     """
     features_columns: List[str] = None
     """List of names of the columns containing additional float features."""
+    features_generators_name: List[str] = None
+    """Method(s) of generating additional molecular features from SMILES."""
     task_type: Literal["regression", "binary", "multi-class"]
     """Type of task."""
     cross_validation: Literal["kFold", "leave-one-out", "Monte-Carlo", "no"] = "no"
@@ -67,16 +70,33 @@ class TrainArgs(Tap):
     """Number of features."""
     ensemble_size: int = 1
     """Number of models in the ensemble."""
-    epochs: int = 50
+    epochs: int = 200
     """Number of training epochs."""
     batch_size: int = 128
     """Batch size for training."""
     weight_decay: float = 0.0
     """Weight decay (L2 regularization) factor."""
+    features_scaling: bool = True
+    """Whether to normalize additional features using StandardScaler. Disable with --no_features_scaling."""
+
+    @property
+    def features_generators(self) -> Optional[List[FeaturesGenerator]]:
+        if self.features_generators_name is None:
+            return None
+        return [FeaturesGenerator(features_generator_name=fg) for fg in self.features_generators_name]
 
     @property
     def n_features(self) -> int:
-        return len(self.features_columns) if self.features_columns else 0
+        n = len(self.features_columns) if self.features_columns else 0
+        if self.features_generators_name is not None:
+            for fg in self.features_generators_name:
+                if fg in ('rdkit_2d', 'rdkit_2d_normalized'):
+                    n += 200
+                elif fg in ('morgan', 'morgan_count'):
+                    n += 2048
+                else:
+                    raise ValueError(f"Unknown features generator: {fg}")
+        return n
 
     @property
     def metrics(self) -> List[Metric]:
@@ -99,8 +119,8 @@ class TrainArgs(Tap):
             n_jobs=self.n_jobs,
         )
         self.dataset.set_status(graph_kernel_type='no',
-                                features_generators=None,
-                                features_combination=None)
+                                features_generators=self.features_generators,
+                                features_combination='concat' if self.features_generators_name else None)
         if self.separate_test_path is not None:
             self.dataset_test = Dataset.from_df(
                 df=self.get_df(self.separate_test_path),
@@ -110,8 +130,8 @@ class TrainArgs(Tap):
                 n_jobs=self.n_jobs,
             )
             self.dataset_test.set_status(graph_kernel_type='no',
-                                        features_generators=None,
-                                        features_combination=None)
+                                        features_generators=self.features_generators,
+                                        features_combination='concat' if self.features_generators_name else None)
         if self.separate_val_path is not None:
             self.dataset_val = Dataset.from_df(
                 df=self.get_df(self.separate_val_path),
@@ -121,8 +141,8 @@ class TrainArgs(Tap):
                 n_jobs=self.n_jobs,
             )
             self.dataset_val.set_status(graph_kernel_type='no',
-                                        features_generators=None,
-                                        features_combination=None)
+                                        features_generators=self.features_generators,
+                                        features_combination='concat' if self.features_generators_name else None)
             self.dataset_train_val = copy.deepcopy(self.dataset)
             self.dataset_train_val.data = self.dataset.data + self.dataset_val.data
 

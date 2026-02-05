@@ -227,11 +227,14 @@ class MolFormer:
                  n_head: int = 12, n_layer: int = 12, n_embd: int = 768, d_dropout: float = 0.1,
                  dropout: float = 0.1, learning_rate: float = 3e-5, num_feats: int = 32, weight_decay: float = 0.0,
                  ensemble_size: int = 1, epochs: int = 50, batch_size: int = 128,
-                 num_workers: int = 8, seed: int = 0, n_features: int = 0):
+                 num_workers: int = 8, seed: int = 0, n_features: int = 0,
+                 features_scaling: bool = False):
         self.save_dir = save_dir
         self.pretrained_path = pretrained_path
         assert os.path.exists(pretrained_path), f"Pretrained model {pretrained_path} not found. Please download it from https://github.com/IBM/molformer"
         self.n_features = n_features
+        self.features_scaling = features_scaling
+        self.scaler = None
         self.tokenizer = MolTranBertTokenizer(os.path.join(CWD, 'bert_vocab.txt'))
         hparams = {
             'mode': 'avg',
@@ -263,6 +266,10 @@ class MolFormer:
         
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        if self.features_scaling and self.n_features > 0 and hasattr(train_data, 'X_features') and train_data.X_features is not None:
+            from sklearn.preprocessing import StandardScaler
+            self.scaler = StandardScaler()
+            self.scaler.fit(train_data.X_features)
         train_data_loader = self.get_dataloader(train_data)
         df_loss = pd.DataFrame({})
         self.models = []
@@ -323,6 +330,8 @@ class MolFormer:
         features = None
         if self.n_features > 0 and hasattr(data, 'X_features') and data.X_features is not None:
             features = data.X_features
+            if self.scaler is not None:
+                features = self.scaler.transform(features)
         data_ = MolFormerDataset(
             smiles_list=data.X_smiles.ravel().tolist(),
             targets=data.y,
