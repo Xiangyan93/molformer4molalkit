@@ -331,12 +331,12 @@ class MolFormer:
 
     def predict_uncertainty(self, pred_data):
         if self.task_type == 'regression':
-            # raise ValueError("Uncertainty estimation is not supported for regression tasks.")
-            return self.predict_value(pred_data)
-        else:
-            preds = self.predict_value(pred_data)
-            preds = np.array([preds, 1-preds]).T
-            return (0.25 - np.var(preds, axis=1)) * 4
+            raise ValueError("Uncertainty estimation is not supported for regression tasks.")
+        preds = np.asarray(self.predict_value(pred_data))
+        preds = np.clip(preds, 1e-10, 1 - 1e-10)
+        # Binary entropy per task, averaged across tasks → 1D (n_samples,)
+        task_entropies = -(preds * np.log(preds) + (1 - preds) * np.log(1 - preds))
+        return np.mean(task_entropies, axis=-1)
 
     def get_dataloader(self, data, shuffle: bool = True):
         assert data.X_smiles.shape[1] == 1, "Only single-column SMILES data is supported for MolFormer."
