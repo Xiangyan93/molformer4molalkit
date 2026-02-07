@@ -95,8 +95,8 @@ def molformer_optuna(arguments=None):
             'dropout': trial.suggest_float('dropout', 0.0, 0.4, step=0.05),
             'learning_rate': trial.suggest_float('learning_rate', 3e-6, 3e-4, log=True),
             # 'num_feats': trial.suggest_categorical('num_feats', [16, 32, 64, 128]),
-            'batch_size': trial.suggest_categorical('batch_size', [32, 64, 128, 256]),
-            'epochs': trial.suggest_categorical('epochs', [10, 30, 50, 100, 200]),
+            'batch_size': trial.suggest_categorical('batch_size', [16, 32, 64]),
+            'epochs': trial.suggest_categorical('epochs', [50, 100, 200, 400, 800]),
             'weight_decay': trial.suggest_categorical('weight_decay', [0.0, 1e-5, 1e-4, 1e-3]),
         }
         try:

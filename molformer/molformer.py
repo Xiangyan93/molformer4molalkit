@@ -230,8 +230,16 @@ class MolFormer:
                  num_workers: int = 8, seed: int = 0, n_features: int = 0,
                  features_scaling: bool = False, no_scale_indices: list = None):
         self.save_dir = save_dir
-        self.pretrained_path = pretrained_path
-        assert os.path.exists(pretrained_path), f"Pretrained model {pretrained_path} not found. Please download it from https://github.com/IBM/molformer"
+        if pretrained_path is None:
+            self.pretrained_path = os.path.join(CWD, 'checkpoints', 'N-Step-Checkpoint_3_30000.ckpt')
+        elif os.path.exists(pretrained_path):
+            self.pretrained_path = pretrained_path
+        elif os.path.exists(os.path.join(CWD, 'checkpoints', pretrained_path)):
+            self.pretrained_path = os.path.join(CWD, 'checkpoints', pretrained_path)
+        else:
+            raise FileNotFoundError(f"Pretrained model {pretrained_path} not found.")
+
+        assert os.path.exists(self.pretrained_path), f"Pretrained model {self.pretrained_path} not found. Please download it from https://github.com/IBM/molformer"
         self.n_features = n_features
         self.features_scaling = features_scaling
         self.no_scale_indices = no_scale_indices
